@@ -1,0 +1,54 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build solution (Release x64)
+        shell: cmd
+        run: |
+          msbuild DesktopWidget.sln ^
+            /p:Configuration=Release ^
+            /p:Platform=x64 ^
+            /t:Rebuild ^
+            /v:minimal
+
+      - name: Verify build artifact
+        shell: pwsh
+        run: |
+          $exe = "build\x64\Release\DesktopWidget.exe"
+          if (-not (Test-Path $exe)) { Write-Error "missing $exe"; exit 1 }
+          Get-Item $exe | Format-Table Name, Length, LastWriteTime
+
+      - name: Cleanup previous release
+        continue-on-error: true
+        shell: pwsh
+        run: gh release delete release --yes --cleanup-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: release
+          name: Latest Build
+          files: |
+            build/x64/Release/DesktopWidget.exe
+          make_latest: true
+          body: |
+            Automatic build from commit: ${{ github.sha }}

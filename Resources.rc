@@ -1,0 +1,5 @@
+#include "ResourceIds.h"
+
+// The application icon. Shown on the settings window and used as the tray
+// icon fallback; the running tray icon is drawn from the live category colors.
+IDI_APP ICON "app.ico"
