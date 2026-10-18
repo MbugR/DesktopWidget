@@ -16,6 +16,7 @@
 #include "HostCommon.h"
 #include "TrayIcon.h"
 #include "Autostart.h"
+#include "Updater.h"
 
 #include <windows.h>
 #include <cstdio>
@@ -129,6 +130,7 @@ constexpr UINT kCmdLock = 301;
 constexpr UINT kCmdClose = 302;
 constexpr UINT kCmdSnap = 303;
 constexpr UINT kCmdCategoryColors = 305;
+constexpr UINT kCmdUpdate = 306;
 constexpr UINT kCmdMonitorFollow = 310;
 constexpr UINT kCmdMonitorBase = 311; // + monitor index
 
@@ -1080,6 +1082,17 @@ void RemoveTrayIcon() {
 	}
 }
 
+// Tray / context menu "Check for updates". The check runs on a worker
+// thread; once an update is staged it signals the quit event, so the widget
+// shuts down as Exit does and main.cpp releases the instance mutex.
+void CheckForUpdates() {
+	Updater_CheckAsync([]() {
+		if (g_quit) {
+			SetEvent(g_quit);
+		}
+	});
+}
+
 // Adds, updates or removes the tray icon to match the settings. Runs every
 // tick, so the colors follow the settings and the taskbar theme.
 void SyncTrayIcon() {
@@ -1104,16 +1117,20 @@ void SyncTrayIcon() {
 				SetEvent(g_quit);
 			}
 		};
-		// "Start with Windows" above the Exit item. onMenu adds it; the Show
-		// (Settings) and Close (Exit) items are supplied by TrayIcon.cpp.
+		// "Start with Windows" and "Check for updates" above the Exit item.
+		// onMenu adds them; the Show (Settings) and Close (Exit) items are
+		// supplied by TrayIcon.cpp.
 		cb.onMenu = [](HMENU menu, int startId) -> int {
 			AppendMenuW(menu, MF_STRING | (Autostart_IsEnabled() ? MF_CHECKED : MF_UNCHECKED), startId,
 				L"Start with Windows");
-			return 1;
+			AppendMenuW(menu, MF_STRING, startId + 1, L"Check for updates");
+			return 2;
 		};
 		cb.onMenuCommand = [](UINT, int localId) {
 			if (localId == 0) {
 				Autostart_SetEnabled(!Autostart_IsEnabled());
+			} else if (localId == 1) {
+				CheckForUpdates();
 			}
 		};
 		g_traySlot = Tray_Start(L"Desktop Widget - click for settings", L"Desktop Widget", 0xB009, true, cb);
@@ -1208,6 +1225,7 @@ void ShowContextMenu(HWND hwnd, POINT pt) {
 	AppendMenuW(menu, MF_STRING | (g_set.snap ? MF_CHECKED : MF_UNCHECKED), kCmdSnap, L"Snap to edges");
 	AppendMenuW(menu, MF_STRING | (g_set.locked ? MF_CHECKED : MF_UNCHECKED), kCmdLock, L"Lock movement");
 	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(menu, MF_STRING, kCmdUpdate, L"Check for updates");
 	AppendMenuW(menu, MF_STRING, kCmdClose, L"Close widget");
 
 	SetForegroundWindow(hwnd);
@@ -1250,6 +1268,9 @@ void ShowContextMenu(HWND hwnd, POINT pt) {
 		g_set.monitor = static_cast<int>(cmd - kCmdMonitorBase);
 	} else if (cmd == kCmdLock) {
 		g_set.locked = !g_set.locked;
+	} else if (cmd == kCmdUpdate) {
+		CheckForUpdates();
+		return;
 	} else if (cmd == kCmdClose) {
 		if (g_quit) {
 			SetEvent(g_quit);

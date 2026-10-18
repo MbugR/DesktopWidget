@@ -25,6 +25,7 @@
     <ClCompile Include="TrayIcon.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="HostCommon.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="Autostart.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="Updater.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DesktopWidget.h"><Filter>Header Files</Filter></ClInclude>
@@ -33,6 +34,7 @@
     <ClInclude Include="TrayIcon.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="HostCommon.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Autostart.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Updater.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="ResourceIds.h"><Filter>Header Files</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>

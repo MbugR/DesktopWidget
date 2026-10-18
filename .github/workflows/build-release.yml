@@ -25,6 +25,7 @@ jobs:
           msbuild DesktopWidget.sln ^
             /p:Configuration=Release ^
             /p:Platform=x64 ^
+            /p:BuildNumber=${{ github.run_number }} ^
             /t:Rebuild ^
             /v:minimal
 
@@ -34,6 +35,16 @@ jobs:
           $exe = "build\x64\Release\DesktopWidget.exe"
           if (-not (Test-Path $exe)) { Write-Error "missing $exe"; exit 1 }
           Get-Item $exe | Format-Table Name, Length, LastWriteTime
+          (Get-Item $exe).VersionInfo | Format-List FileVersion, ProductVersion
+
+      - name: Write version and checksum
+        shell: pwsh
+        run: |
+          $exe = "build\x64\Release\DesktopWidget.exe"
+          Set-Content -Path build\x64\Release\version.txt -Value "${{ github.run_number }}" -NoNewline -Encoding ascii
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "$exe.sha256" -Value $hash -NoNewline -Encoding ascii
+          Get-Content build\x64\Release\version.txt, "$exe.sha256"
 
       - name: Cleanup previous release
         continue-on-error: true
@@ -46,9 +57,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: release
-          name: Latest Build
+          name: Latest Build (1.0.${{ github.run_number }})
           files: |
             build/x64/Release/DesktopWidget.exe
+            build/x64/Release/DesktopWidget.exe.sha256
+            build/x64/Release/version.txt
           make_latest: true
           body: |
-            Automatic build from commit: ${{ github.sha }}
+            Version 1.0.${{ github.run_number }}, automatic build from commit: ${{ github.sha }}

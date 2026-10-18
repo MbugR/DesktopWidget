@@ -36,18 +36,23 @@
     <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)build\obj\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>DesktopWidget</TargetName>
+    <!-- CI passes /p:BuildNumber=N (version 1.0.N); local builds are 1.0.0. -->
+    <BuildNumber Condition="'$(BuildNumber)'==''">0</BuildNumber>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;APP_BUILD=$(BuildNumber);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>APP_BUILD=$(BuildNumber);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -60,13 +65,16 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;APP_BUILD=$(BuildNumber);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>APP_BUILD=$(BuildNumber);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -86,6 +94,7 @@
     <ClCompile Include="TrayIcon.cpp" />
     <ClCompile Include="HostCommon.cpp" />
     <ClCompile Include="Autostart.cpp" />
+    <ClCompile Include="Updater.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="DesktopWidget.h" />
@@ -94,6 +103,7 @@
     <ClInclude Include="TrayIcon.h" />
     <ClInclude Include="HostCommon.h" />
     <ClInclude Include="Autostart.h" />
+    <ClInclude Include="Updater.h" />
     <ClInclude Include="ResourceIds.h" />
   </ItemGroup>
   <ItemGroup>

@@ -106,6 +106,12 @@ For the PawnIO readings you need either:
 
   (and leave *Start with Windows* unchecked so the two do not both launch).
 
+## Updates
+
+Right-click the tray icon and choose **Check for updates**. Nothing is checked automatically: no check at startup, no timer. The app asks GitHub for the latest release (`version.txt`) and, if a newer build exists, offers to update. Accepting downloads `DesktopWidget.exe` next to the running exe as `DesktopWidget.exe.new`, verifies it against the published `DesktopWidget.exe.sha256`, then a hidden PowerShell helper waits for the app to exit, swaps the file in and starts it again.
+
+Versions are `1.0.N`, where N is the CI build number; local builds report `1.0.0`. The exe must sit in a folder you can write to (not Program Files) for the update to work.
+
 ## Build
 
 Requirements: Visual Studio 2022 with the "Desktop development with C++"
