@@ -12,6 +12,7 @@
 // non-core DLL here.
 
 #include "DesktopWidget.h"
+#include "Autostart.h"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -49,8 +50,10 @@ enum ControlId {
 	kIdSnap,
 	kIdLock,
 	kIdTrayIcon,
+	kIdAutostart,
 	kIdSuperIoFans = 1060,
 	kIdResetFans,
+	kIdGetPawnIo,
 	kIdMonitor = 1065,
 	kIdCatColorBase = 1070, // + Category
 	kIdAnchorBase = 1080, // + Anchor
@@ -452,6 +455,8 @@ void BuildControls() {
 	AddCheck(kIdLock, L"Lock movement", c.x + kPad + 232, y, kColW - 2 * kPad - 232, s.locked);
 	y += kRowH;
 	AddCheck(kIdTrayIcon, L"Tray icon (click opens these settings)", c.x + kPad, y, 330, s.trayIcon, true);
+	y += kRowH;
+	AddCheck(kIdAutostart, L"Start with Windows", c.x + kPad, y, 200, Autostart_IsEnabled(), true);
 	c.y = y + kRowH;
 	y = c.End();
 
@@ -472,6 +477,8 @@ void BuildControls() {
 	y = c.Begin(1, y, L"Motherboard Fans");
 	AddButton(kIdResetFans, L"Reset fan sensor", c.x + kColW - kPad - 130, c.top + kPad - 4, 130, 26);
 	g_fanStatusRc = { c.x + kPad, y + 2, c.x + kColW - kPad, y + 20 };
+	// Shown only while the sensors report that PawnIO is not installed.
+	ShowWindow(AddButton(kIdGetPawnIo, L"Get PawnIO", c.x + kColW - kPad - 90, y - 1, 90, 22), SW_HIDE);
 	y += kRowH - 4;
 	AddCheck(kIdSuperIoFans, L"Read fans from the Super I/O chip (read only)", c.x + kPad, y, 320, s.superIoFans, true);
 	c.y = y + kRowH;
@@ -487,6 +494,17 @@ void BuildControls() {
 
 void SetCheck(int id, bool on) {
 	SendMessageW(GetDlgItem(g_wnd, id), BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+// State that lives outside the settings: the autostart Run value (the tray
+// and widget menus toggle it too) and whether PawnIO is missing.
+void RefreshExternalState() {
+	SetCheck(kIdAutostart, Autostart_IsEnabled());
+	HWND get = GetDlgItem(g_wnd, kIdGetPawnIo);
+	const bool missing = PawnIoMissing();
+	if (get && ((GetWindowLongW(get, GWL_STYLE) & WS_VISIBLE) != 0) != missing) {
+		ShowWindow(get, missing ? SW_SHOW : SW_HIDE);
+	}
 }
 
 // Puts every control back in line with the settings (after a reset).
@@ -516,6 +534,7 @@ void SyncControls() {
 	SendMessageW(GetDlgItem(g_wnd, kIdScale), TBM_SETPOS, TRUE, s.scale);
 	SendMessageW(GetDlgItem(g_wnd, kIdAnchorMargin), TBM_SETPOS, TRUE, s.anchorMargin);
 	SetCheck(kIdTrayIcon, s.trayIcon);
+	SetCheck(kIdAutostart, Autostart_IsEnabled());
 	for (int i = 0; i < kLayoutCount; ++i) {
 		SetCheck(kIdLayoutBase + i, s.layout == i);
 	}
@@ -585,7 +604,11 @@ void PaintWindow(HWND hwnd) {
 	DrawTextW(dc, anchor, -1, &g_anchorStatusRc, DT_LEFT | DT_WORDBREAK);
 	wchar_t status[128];
 	FanSensorStatus(status, 128);
-	DrawTextW(dc, status, -1, &g_fanStatusRc, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+	RECT fanRc = g_fanStatusRc;
+	if (GetWindowLongW(GetDlgItem(hwnd, kIdGetPawnIo), GWL_STYLE) & WS_VISIBLE) {
+		fanRc.right -= 96; // leave the Get PawnIO button clear
+	}
+	DrawTextW(dc, status, -1, &fanRc, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
 	SelectObject(dc, oldFont);
 	EndPaint(hwnd, &ps);
 }
@@ -802,6 +825,14 @@ void OnCommand(int id, int code) {
 		s.locked = Checked(id);
 	} else if (id == kIdTrayIcon) {
 		s.trayIcon = Checked(id);
+	} else if (id == kIdAutostart) {
+		// Not a widget setting: the HKCU Run value is the state.
+		Autostart_SetEnabled(Checked(id));
+		SetCheck(id, Autostart_IsEnabled());
+		return;
+	} else if (id == kIdGetPawnIo) {
+		OpenPawnIoSite();
+		return;
 	} else if (IsAnchorButton(id)) {
 		const int a = id - kIdAnchorBase;
 		s.anchor = s.anchor == a ? kAnchorFree : a; // the pinned spot again unpins
@@ -904,6 +935,7 @@ LRESULT CALLBACK SettingsProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		return 0;
 	case WM_TIMER:
 		if (wParam == kStatusTimer) {
+			RefreshExternalState();
 			InvalidateRect(hwnd, &g_fanStatusRc, FALSE);
 		}
 		return 0;
@@ -963,6 +995,7 @@ void ShowSettingsWindow(HWND widgetWnd) {
 		if (IsIconic(g_wnd)) {
 			ShowWindow(g_wnd, SW_RESTORE);
 		}
+		RefreshExternalState();
 		SetWindowPos(g_wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
 		SetForegroundWindow(g_wnd);
 		return;
@@ -992,6 +1025,7 @@ void ShowSettingsWindow(HWND widgetWnd) {
 	SendMessageW(g_wnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(g_iconSmall));
 	SendMessageW(g_wnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(g_iconBig));
 	BuildControls();
+	RefreshExternalState();
 	SetTimer(g_wnd, kStatusTimer, 1000, nullptr); // fan sensor status line
 
 	RECT frame = { 0, 0, kClientW, g_clientH };

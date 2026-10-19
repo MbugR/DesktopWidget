@@ -21,6 +21,7 @@
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 const PawnModule kPawnModuleAmdFamily17 = { L"AMDFamily17.bin", "795107e2d150d54c9ff7fd53367f6a6c48ec0a71" };
+const wchar_t kPawnNotInstalled[] = L"PawnIO not installed - get it at pawnio.eu";
 const PawnModule kPawnModuleLpcIo = { L"LpcIO.bin", "d80aa0bcc73fa8ff5d787a21dfca8a1961e643d0" };
 
 namespace {
@@ -68,7 +69,7 @@ bool StartPawnIoService(PawnStatus& status) {
 	SC_HANDLE svc = OpenServiceW(scm, kPawnIoService, SERVICE_QUERY_STATUS | SERVICE_START);
 	if (!svc) {
 		const DWORD err = GetLastError();
-		SetStatus(status, err == ERROR_SERVICE_DOES_NOT_EXIST ? L"PawnIO driver is not installed"
+		SetStatus(status, err == ERROR_SERVICE_DOES_NOT_EXIST ? kPawnNotInstalled
 			: err == ERROR_ACCESS_DENIED ? L"no admin rights to start PawnIO"
 			: L"cannot open the PawnIO service");
 		CloseServiceHandle(scm);
@@ -245,27 +246,63 @@ bool CreatePawnIoDevNode(PawnStatus& status, const SetupApi& api) {
 	return ok;
 }
 
-// Device missing: add the device node if there is none, start the service
-// if the node exists but the driver is not running, then wait for the
-// device to appear.
+// Device not opened yet. The official PawnIO installer (pawnio.eu) leaves a
+// running service, so first just open the device; then start a stopped
+// service; only then fall back to adding the Root\PawnIO node (and the
+// optional bundled driver).
 HANDLE BringUpPawnIoDevice(PawnStatus& status) {
-	SetupApi api = {};
-	if (!LoadSetupApi(api)) {
-		SetStatus(status, L"setupapi unavailable");
+	if (HANDLE h = OpenPawnIoDevice()) {
+		return h;
+	}
+	if (GetLastError() == ERROR_ACCESS_DENIED) {
+		// The device is there, but only administrators may open it.
+		SetStatus(status, L"run as administrator for PawnIO");
 		return nullptr;
 	}
-	if (!PawnIoDevNodeExists(api)) {
-		// On a machine where PawnIO was never installed the driver is not in the
-		// store, so creating the node would just fail with "driver not installed".
-		// Install the bundled, WHQL-signed driver first (needs admin), then add
-		// the node so PnP can bind it.
-		if (!PawnIoServiceInstalled() && !InstallPawnIoDriver(status, api)) {
+	const bool installed = PawnIoServiceInstalled();
+	if (installed) {
+		if (StartPawnIoService(status)) {
+			for (int i = 0; i < 30; ++i) {
+				if (HANDLE h = OpenPawnIoDevice()) {
+					return h;
+				}
+				if (GetLastError() == ERROR_ACCESS_DENIED) {
+					SetStatus(status, L"run as administrator for PawnIO");
+					return nullptr;
+				}
+				Sleep(100);
+			}
+		}
+	}
+	SetupApi api = {};
+	if (!LoadSetupApi(api)) {
+		if (!installed) {
+			SetStatus(status, kPawnNotInstalled);
+		}
+		return nullptr;
+	}
+	if (PawnIoDevNodeExists(api)) {
+		if (installed) {
+			// Node and service exist but no device: nothing more to try here.
+			SetStatus(status, L"PawnIO device did not appear");
+		} else {
+			SetStatus(status, kPawnNotInstalled);
+		}
+		return nullptr;
+	}
+	// No node. Without the service the driver is not in the store: only the
+	// optional bundled driver (PawnIODriver folder, admin) can help.
+	if (!installed) {
+		wchar_t inf[MAX_PATH];
+		if (!FindBundledInf(inf, MAX_PATH)) {
+			SetStatus(status, kPawnNotInstalled);
 			return nullptr;
 		}
-		if (!CreatePawnIoDevNode(status, api)) {
+		if (!InstallPawnIoDriver(status, api)) {
 			return nullptr;
 		}
-	} else if (!StartPawnIoService(status)) {
+	}
+	if (!CreatePawnIoDevNode(status, api)) {
 		return nullptr;
 	}
 	for (int i = 0; i < 50; ++i) {
@@ -436,12 +473,9 @@ bool GetModule(const PawnModule& module, PawnStatus& status, BYTE* buf, DWORD ca
 }
 
 HANDLE OpenLocked(const PawnModule& module, PawnStatus& status) {
-	HANDLE device = OpenPawnIoDevice();
+	HANDLE device = BringUpPawnIoDevice(status);
 	if (!device) {
-		device = BringUpPawnIoDevice(status);
-		if (!device) {
-			return nullptr;
-		}
+		return nullptr;
 	}
 	BYTE* buf = static_cast<BYTE*>(HeapAlloc(GetProcessHeap(), 0, kModuleMaxSize));
 	DWORD size = 0;
@@ -465,6 +499,14 @@ HANDLE OpenLocked(const PawnModule& module, PawnStatus& status) {
 }
 
 } // namespace
+
+bool PawnIo_IsInstalled() {
+	return PawnIoServiceInstalled();
+}
+
+bool PawnIo_StatusNotInstalled(const wchar_t* status) {
+	return lstrcmpW(status, kPawnNotInstalled) == 0;
+}
 
 HANDLE PawnIo_Open(const PawnModule& module, PawnStatus& status) {
 	AcquireSRWLockExclusive(&g_openLock);

@@ -159,6 +159,11 @@ void ResetSettings();
 void ResetFanSensor();
 // "IT8688E: ok", "starting...", "off", or why it is unavailable.
 void FanSensorStatus(wchar_t* out, size_t cap);
+// True when the CPU temperature or fan sensor failed because PawnIO is not
+// installed (the menus and settings then offer the pawnio.eu link).
+bool PawnIoMissing();
+// Opens https://pawnio.eu in the default browser.
+void OpenPawnIoSite();
 
 // DesktopWidget.cpp: the widget run loop. main.cpp owns the single-instance
 // mutex and calls this once; it returns when the user chooses Exit.

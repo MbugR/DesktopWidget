@@ -17,6 +17,7 @@
 #include "TrayIcon.h"
 #include "Autostart.h"
 #include "Updater.h"
+#include "PawnIo.h"
 
 #include <windows.h>
 #include <cstdio>
@@ -131,6 +132,8 @@ constexpr UINT kCmdClose = 302;
 constexpr UINT kCmdSnap = 303;
 constexpr UINT kCmdCategoryColors = 305;
 constexpr UINT kCmdUpdate = 306;
+constexpr UINT kCmdAutostart = 307;
+constexpr UINT kCmdInstallPawnIo = 308;
 constexpr UINT kCmdMonitorFollow = 310;
 constexpr UINT kCmdMonitorBase = 311; // + monitor index
 
@@ -1124,6 +1127,10 @@ void SyncTrayIcon() {
 			AppendMenuW(menu, MF_STRING | (Autostart_IsEnabled() ? MF_CHECKED : MF_UNCHECKED), startId,
 				L"Start with Windows");
 			AppendMenuW(menu, MF_STRING, startId + 1, L"Check for updates");
+			if (PawnIoMissing()) {
+				AppendMenuW(menu, MF_STRING, startId + 2, L"Install PawnIO...");
+				return 3;
+			}
 			return 2;
 		};
 		cb.onMenuCommand = [](UINT, int localId) {
@@ -1131,6 +1138,8 @@ void SyncTrayIcon() {
 				Autostart_SetEnabled(!Autostart_IsEnabled());
 			} else if (localId == 1) {
 				CheckForUpdates();
+			} else if (localId == 2) {
+				OpenPawnIoSite();
 			}
 		};
 		g_traySlot = Tray_Start(L"Desktop Widget - click for settings", L"Desktop Widget", 0xB009, true, cb);
@@ -1225,6 +1234,10 @@ void ShowContextMenu(HWND hwnd, POINT pt) {
 	AppendMenuW(menu, MF_STRING | (g_set.snap ? MF_CHECKED : MF_UNCHECKED), kCmdSnap, L"Snap to edges");
 	AppendMenuW(menu, MF_STRING | (g_set.locked ? MF_CHECKED : MF_UNCHECKED), kCmdLock, L"Lock movement");
 	AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenuW(menu, MF_STRING | (Autostart_IsEnabled() ? MF_CHECKED : MF_UNCHECKED), kCmdAutostart, L"Start with Windows");
+	if (PawnIoMissing()) {
+		AppendMenuW(menu, MF_STRING, kCmdInstallPawnIo, L"Install PawnIO...");
+	}
 	AppendMenuW(menu, MF_STRING, kCmdUpdate, L"Check for updates");
 	AppendMenuW(menu, MF_STRING, kCmdClose, L"Close widget");
 
@@ -1268,6 +1281,13 @@ void ShowContextMenu(HWND hwnd, POINT pt) {
 		g_set.monitor = static_cast<int>(cmd - kCmdMonitorBase);
 	} else if (cmd == kCmdLock) {
 		g_set.locked = !g_set.locked;
+	} else if (cmd == kCmdAutostart) {
+		Autostart_SetEnabled(!Autostart_IsEnabled());
+		SyncSettingsWindow();
+		return;
+	} else if (cmd == kCmdInstallPawnIo) {
+		OpenPawnIoSite();
+		return;
 	} else if (cmd == kCmdUpdate) {
 		CheckForUpdates();
 		return;
@@ -1557,6 +1577,21 @@ void ResetFanSensor() {
 	CloseFans();
 	if (g_set.superIoFans && (Wants(kCpuFan) || Wants(kSysFan1) || Wants(kSysFan2))) {
 		SampleFans(); // starts the reconnect right away
+	}
+}
+
+bool PawnIoMissing() {
+	return (AsyncState(g_cpuTempOpen) == kOpenFailed && PawnIo_StatusNotInstalled(g_cpuTemp.status))
+		|| (AsyncState(g_fansOpen) == kOpenFailed && PawnIo_StatusNotInstalled(g_fans.status));
+}
+
+void OpenPawnIoSite() {
+	// shell32 is resolved at runtime like the tray's Shell_NotifyIconW.
+	using ShellExecuteW_t = HINSTANCE(WINAPI*)(HWND, LPCWSTR, LPCWSTR, LPCWSTR, LPCWSTR, INT);
+	HMODULE shell = LoadLibraryW(L"shell32.dll");
+	auto fn = shell ? reinterpret_cast<ShellExecuteW_t>(GetProcAddress(shell, "ShellExecuteW")) : nullptr;
+	if (fn) {
+		fn(nullptr, L"open", kPawnIoUrl, nullptr, nullptr, SW_SHOWNORMAL);
 	}
 }
 

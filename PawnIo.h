@@ -27,6 +27,14 @@ using PawnStatus = wchar_t[kPawnStatusLen];
 // serialized. On failure returns nullptr and writes a short reason.
 HANDLE PawnIo_Open(const PawnModule& module, PawnStatus& status);
 
+// Status PawnIo_Open writes when the PawnIO service is not on the machine.
+extern const wchar_t kPawnNotInstalled[];
+// True when the PawnIO service exists (installed, running or not).
+bool PawnIo_IsInstalled();
+// True when `status` is kPawnNotInstalled.
+bool PawnIo_StatusNotInstalled(const wchar_t* status);
+constexpr wchar_t kPawnIoUrl[] = L"https://pawnio.eu";
+
 bool PawnIo_Execute(HANDLE h, const char* fn, const ULONG64* in, size_t inCount, ULONG64* out, size_t outCount);
 
 // System-wide mutexes that other hardware monitors (LibreHardwareMonitor,
