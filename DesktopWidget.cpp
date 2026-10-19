@@ -1303,6 +1303,111 @@ void ShowContextMenu(HWND hwnd, POINT pt) {
 	SyncSettingsWindow();
 }
 
+// Always-on-top guard, run from the 1 s tick. Another topmost window shown
+// later lands above us in the topmost band; WM_WINDOWPOSCHANGING never fires
+// for that, so check here. dwmapi/shell32 are resolved at run time (no new
+// static imports: a static SHELL32 import breaks the Verifier-loaded hook).
+static HWND g_topJumpedOver = nullptr;
+
+static bool TopGuard_IsCloaked(HWND w) {
+	typedef HRESULT (WINAPI *DwmGetWindowAttribute_t)(HWND, DWORD, PVOID, DWORD);
+	static DwmGetWindowAttribute_t fn = nullptr;
+	static bool tried = false;
+	if (!tried) {
+		tried = true;
+		HMODULE mod = LoadLibraryW(L"dwmapi.dll");
+		if (mod) {
+			fn = (DwmGetWindowAttribute_t)GetProcAddress(mod, "DwmGetWindowAttribute");
+		}
+	}
+	if (!fn) {
+		return false;
+	}
+	DWORD cloaked = 0;
+	const DWORD kDwmCloaked = 14; // DWMWA_CLOAKED
+	if (FAILED(fn(w, kDwmCloaked, &cloaked, sizeof(cloaked)))) {
+		return false;
+	}
+	return cloaked != 0;
+}
+
+static bool TopGuard_FullscreenForeground() {
+	typedef HRESULT (WINAPI *SHQueryUserNotificationState_t)(int *);
+	static SHQueryUserNotificationState_t fn = nullptr;
+	static bool tried = false;
+	if (!tried) {
+		tried = true;
+		HMODULE mod = LoadLibraryW(L"shell32.dll");
+		if (mod) {
+			fn = (SHQueryUserNotificationState_t)GetProcAddress(mod, "SHQueryUserNotificationState");
+		}
+	}
+	if (!fn) {
+		return false;
+	}
+	int state = 0;
+	if (FAILED(fn(&state))) {
+		return false;
+	}
+	// QUNS_BUSY = 2, QUNS_RUNNING_D3D_FULL_SCREEN = 3, QUNS_PRESENTATION_MODE = 4
+	return state == 2 || state == 3 || state == 4;
+}
+
+static void KeepTopMost(HWND hwnd) {
+	if (!g_set.topMost || !IsWindowVisible(hwnd)) {
+		g_topJumpedOver = nullptr;
+		return;
+	}
+	const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+	if (!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
+		g_topJumpedOver = nullptr;
+		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+		return;
+	}
+	if (TopGuard_FullscreenForeground()) {
+		return;
+	}
+	RECT me;
+	if (!GetWindowRect(hwnd, &me)) {
+		return;
+	}
+	const DWORD myPid = GetCurrentProcessId();
+	HWND cover = nullptr;
+	for (HWND w = GetWindow(hwnd, GW_HWNDPREV); w; w = GetWindow(w, GW_HWNDPREV)) {
+		if (!IsWindowVisible(w) || !(GetWindowLongPtrW(w, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
+			continue;
+		}
+		DWORD pid = 0;
+		GetWindowThreadProcessId(w, &pid);
+		if (pid == myPid) {
+			continue;
+		}
+		wchar_t cls[16];
+		if (GetClassNameW(w, cls, 16) && wcscmp(cls, L"#32768") == 0) {
+			continue;
+		}
+		RECT rc;
+		RECT hit;
+		if (!GetWindowRect(w, &rc) || !IntersectRect(&hit, &rc, &me)) {
+			continue;
+		}
+		if (TopGuard_IsCloaked(w)) {
+			continue;
+		}
+		cover = w;
+		break;
+	}
+	if (!cover) {
+		g_topJumpedOver = nullptr;
+		return;
+	}
+	if (cover == g_topJumpedOver) {
+		return; // jumped over it once already; don't fight another always-on-top app
+	}
+	g_topJumpedOver = cover;
+	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+}
+
 LRESULT CALLBACK WidgetProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg) {
 	case WM_PAINT:
@@ -1316,6 +1421,7 @@ LRESULT CALLBACK WidgetProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			InvalidateRect(hwnd, nullptr, FALSE);
 			SyncTrayIcon();
 			KeepOnChosenMonitor(hwnd);
+			KeepTopMost(hwnd);
 		}
 		return 0;
 	case WM_MOUSEACTIVATE:
