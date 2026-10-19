@@ -2,6 +2,7 @@
 #include <ws2ipdef.h>
 #include <windows.h>
 #include <iphlpapi.h>
+#include <psapi.h>
 #include <winternl.h>
 #include <d3dkmthk.h>
 
@@ -220,6 +221,78 @@ bool Ram_Read(RamReading& out) {
 	out.loadPct = static_cast<int>(ms.dwMemoryLoad);
 	out.totalGb = static_cast<double>(ms.ullTotalPhys) / (1024.0 * 1024.0 * 1024.0);
 	out.usedGb = static_cast<double>(ms.ullTotalPhys - ms.ullAvailPhys) / (1024.0 * 1024.0 * 1024.0);
+	return true;
+}
+
+// Both resolved at run time so the hook DLL's import list stays unchanged.
+bool Commit_Read(CommitReading& out) {
+	using GetPerfInfoFn = BOOL(WINAPI*)(PERFORMANCE_INFORMATION*, DWORD);
+	static GetPerfInfoFn s_fn = reinterpret_cast<GetPerfInfoFn>(
+		GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "K32GetPerformanceInfo"));
+	if (!s_fn) {
+		return false;
+	}
+	PERFORMANCE_INFORMATION pi = {};
+	pi.cb = sizeof(pi);
+	if (!s_fn(&pi, sizeof(pi))) {
+		return false;
+	}
+	const double page = static_cast<double>(pi.PageSize);
+	out.usedGb = static_cast<double>(pi.CommitTotal) * page / (1024.0 * 1024.0 * 1024.0);
+	out.limitGb = static_cast<double>(pi.CommitLimit) * page / (1024.0 * 1024.0 * 1024.0);
+	return true;
+}
+
+bool PageFile_ReadUsedGb(double& gb) {
+	struct PageFileInfo {
+		ULONG NextEntryOffset;
+		ULONG TotalSize;
+		ULONG TotalInUse;
+		ULONG PeakUsage;
+		UNICODE_STRING PageFileName;
+	};
+	using QuerySysInfoFn = LONG(NTAPI*)(ULONG, PVOID, ULONG, PULONG);
+	static QuerySysInfoFn s_fn = reinterpret_cast<QuerySysInfoFn>(
+		GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation"));
+	if (!s_fn) {
+		return false;
+	}
+	alignas(8) BYTE buf[4096];
+	ULONG len = 0;
+	const LONG st = s_fn(18 /* SystemPageFileInformation */, buf, sizeof(buf), &len);
+	if (st < 0) {
+		return false;
+	}
+	ULONG pageSize = 0;
+	{
+		using GetPerfInfoFn = BOOL(WINAPI*)(PERFORMANCE_INFORMATION*, DWORD);
+		static GetPerfInfoFn s_pi = reinterpret_cast<GetPerfInfoFn>(
+			GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "K32GetPerformanceInfo"));
+		PERFORMANCE_INFORMATION pi = {};
+		pi.cb = sizeof(pi);
+		if (s_pi && s_pi(&pi, sizeof(pi))) {
+			pageSize = static_cast<ULONG>(pi.PageSize);
+		}
+	}
+	if (pageSize == 0) {
+		return false;
+	}
+	ULONGLONG pages = 0;
+	if (len >= sizeof(PageFileInfo)) {
+		ULONG off = 0;
+		for (;;) {
+			if (off + sizeof(PageFileInfo) > len) {
+				break;
+			}
+			const PageFileInfo* p = reinterpret_cast<const PageFileInfo*>(buf + off);
+			pages += p->TotalInUse;
+			if (p->NextEntryOffset == 0) {
+				break;
+			}
+			off += p->NextEntryOffset;
+		}
+	}
+	gb = static_cast<double>(pages) * pageSize / (1024.0 * 1024.0 * 1024.0);
 	return true;
 }
 

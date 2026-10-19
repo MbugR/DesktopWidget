@@ -91,6 +91,16 @@ struct RamReading {
 
 bool Ram_Read(RamReading& out);
 
+// System commit charge and limit (Task Manager "Committed").
+struct CommitReading {
+	double usedGb;
+	double limitGb;
+};
+
+bool Commit_Read(CommitReading& out);
+// Pages in use summed over every page file; 0 when there is none.
+bool PageFile_ReadUsedGb(double& gb);
+
 // ---- GPU (D3DKMT, same source as Task Manager) ---------------------------
 
 constexpr int kGpuMaxNodes = 64;

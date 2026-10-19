@@ -26,6 +26,8 @@ enum Metric {
 	kCpuFan,
 	kSysFan1,
 	kSysFan2,
+	kCommitUsed,
+	kPageFileUsed,
 	kMetricCount
 };
 

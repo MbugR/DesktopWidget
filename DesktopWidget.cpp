@@ -50,12 +50,14 @@ const MetricInfo kMetrics[kMetricCount] = {
 	{ L"CPU Fan", L"CPU fan", kCatCpu },
 	{ L"SYS Fan 1", L"System fan 1", kCatBoard },
 	{ L"SYS Fan 2", L"System fan 2", kCatBoard },
+	{ L"Committed", L"Committed (GB)", kCatMemory },
+	{ L"Page File", L"Page file used (GB)", kCatMemory },
 };
 
 const int kOrder[kMetricCount] = {
 	kCpuTemp, kCpuLoad, kCpuClock, kCpuFan,
 	kGpuTemp, kGpuLoad, kGpuClock, kGpuFan, kVramUsed, kVramLoad,
-	kRamUsed, kRamLoad, kDiskActive, kNetDown, kNetUp,
+	kRamUsed, kRamLoad, kCommitUsed, kPageFileUsed, kDiskActive, kNetDown, kNetUp,
 	kSysFan1, kSysFan2,
 };
 
@@ -751,6 +753,22 @@ void SampleAll() {
 		if (Ram_Read(r)) {
 			SetTileInt(kRamLoad, r.loadPct, L"%");
 			SetTileGb(kRamUsed, r.usedGb);
+		}
+	}
+	if (Wants(kCommitUsed)) {
+		CommitReading r;
+		if (Commit_Read(r)) {
+			SetTileGb(kCommitUsed, r.usedGb);
+		} else {
+			SetNoValue(kCommitUsed);
+		}
+	}
+	if (Wants(kPageFileUsed)) {
+		double gb = 0.0;
+		if (PageFile_ReadUsedGb(gb)) {
+			SetTileGb(kPageFileUsed, gb);
+		} else {
+			SetNoValue(kPageFileUsed);
 		}
 	}
 	if (Wants(kDiskActive)) {
