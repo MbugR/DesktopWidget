@@ -119,7 +119,8 @@ struct GpuReading {
 	double vramTotalGb;
 };
 
-// Picks the first hardware render adapter. False when there is none.
+// Picks the discrete GPU: the hardware render adapter with the most
+// dedicated video memory. False when there is none.
 bool Gpu_Open(GpuSensor& s);
 bool Gpu_Sample(GpuSensor& s, GpuReading& out);
 void Gpu_Close(GpuSensor& s);

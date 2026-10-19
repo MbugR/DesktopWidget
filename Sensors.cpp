@@ -251,14 +251,60 @@ bool Gpu_Open(GpuSensor& s) {
 		return false;
 	}
 	const auto query = reinterpret_cast<QueryAdapterInfoFn>(s.queryAdapterInfo);
+	const auto queryStats = reinterpret_cast<QueryStatisticsFn>(s.queryStatistics);
+	// Pick the discrete GPU: among the hardware render adapters, the one with
+	// the most dedicated (non-aperture) video memory. On a machine with an
+	// integrated GPU plus a discrete card (e.g. AMD iGPU + RTX), the iGPU
+	// often enumerates first, so "first hardware adapter" would read the
+	// wrong card's temperature, clock, load and VRAM. The same adapter is
+	// then used for every reading, so they all stay consistent.
+	ULONGLONG bestVram = 0;
+	ULONG bestNodes = 0;
+	ULONG bestSegments = 0;
 	for (ULONG i = 0; i < ea.NumAdapters; ++i) {
 		D3DKMT_ADAPTERTYPE type = {};
 		D3DKMT_QUERYADAPTERINFO q = { infos[i].hAdapter, KMTQAITYPE_ADAPTERTYPE, &type, sizeof(type) };
 		const bool hardware = query(&q) == 0 && type.RenderSupported && !type.SoftwareDevice;
-		if (!s.ok && hardware) {
+		if (!hardware) {
+			CloseAdapterHandle(s.closeAdapter, infos[i].hAdapter);
+			continue;
+		}
+		// Dedicated memory and segment/node counts for this adapter.
+		D3DKMT_QUERYSTATISTICS qs = {};
+		qs.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
+		qs.AdapterLuid = infos[i].AdapterLuid;
+		ULONG nodeCount = 0;
+		ULONG segmentCount = 0;
+		if (queryStats(&qs) == 0) {
+			nodeCount = qs.QueryResult.AdapterInformation.NodeCount;
+			segmentCount = qs.QueryResult.AdapterInformation.NbSegments;
+		}
+		ULONGLONG dedicated = 0;
+		for (ULONG seg = 0; seg < segmentCount; ++seg) {
+			D3DKMT_QUERYSTATISTICS sq = {};
+			sq.Type = D3DKMT_QUERYSTATISTICS_SEGMENT;
+			sq.AdapterLuid = infos[i].AdapterLuid;
+			sq.QuerySegment.SegmentId = seg;
+			if (queryStats(&sq) != 0) {
+				continue;
+			}
+			const D3DKMT_QUERYSTATISTICS_SEGMENT_INFORMATION& info = sq.QueryResult.SegmentInformation;
+			if (!info.Aperture) {
+				dedicated += info.CommitLimit;
+			}
+		}
+		// Prefer the largest dedicated VRAM. When nothing reports VRAM yet
+		// (dedicated == 0 everywhere), the first hardware adapter still wins.
+		if (!s.ok || dedicated > bestVram) {
+			if (s.ok) {
+				CloseAdapterHandle(s.closeAdapter, s.adapter);
+			}
 			s.ok = true;
 			s.adapter = infos[i].hAdapter;
 			s.luid = infos[i].AdapterLuid;
+			bestVram = dedicated;
+			bestNodes = nodeCount;
+			bestSegments = segmentCount;
 		} else {
 			CloseAdapterHandle(s.closeAdapter, infos[i].hAdapter);
 		}
@@ -266,13 +312,8 @@ bool Gpu_Open(GpuSensor& s) {
 	if (!s.ok) {
 		return false;
 	}
-	D3DKMT_QUERYSTATISTICS qs = {};
-	qs.Type = D3DKMT_QUERYSTATISTICS_ADAPTER;
-	qs.AdapterLuid = s.luid;
-	if (reinterpret_cast<QueryStatisticsFn>(s.queryStatistics)(&qs) == 0) {
-		s.nodeCount = qs.QueryResult.AdapterInformation.NodeCount;
-		s.segmentCount = qs.QueryResult.AdapterInformation.NbSegments;
-	}
+	s.nodeCount = bestNodes;
+	s.segmentCount = bestSegments;
 	if (s.nodeCount > kGpuMaxNodes) {
 		s.nodeCount = kGpuMaxNodes;
 	}

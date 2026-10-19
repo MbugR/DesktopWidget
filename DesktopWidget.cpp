@@ -1632,6 +1632,7 @@ void widget::RunWidget() {
 	HANDLE settingsEv = CreateEventW(nullptr, FALSE, FALSE, kWidgetSettingsEvent);
 
 	LoadSettings();
+	Autostart_StartupSync(); // migrate off old Run value; keep task path current
 	for (Tile& t : g_tiles) {
 		t = {};
 	}
