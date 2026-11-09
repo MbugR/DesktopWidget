@@ -1325,8 +1325,6 @@ void ShowContextMenu(HWND hwnd, POINT pt) {
 // later lands above us in the topmost band; WM_WINDOWPOSCHANGING never fires
 // for that, so check here. dwmapi/shell32 are resolved at run time (no new
 // static imports: a static SHELL32 import breaks the Verifier-loaded hook).
-static HWND g_topJumpedOver = nullptr;
-
 static bool TopGuard_IsCloaked(HWND w) {
 	typedef HRESULT (WINAPI *DwmGetWindowAttribute_t)(HWND, DWORD, PVOID, DWORD);
 	static DwmGetWindowAttribute_t fn = nullptr;
@@ -1373,12 +1371,10 @@ static bool TopGuard_FullscreenForeground() {
 
 static void KeepTopMost(HWND hwnd) {
 	if (!g_set.topMost || !IsWindowVisible(hwnd)) {
-		g_topJumpedOver = nullptr;
 		return;
 	}
 	const UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
 	if (!(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
-		g_topJumpedOver = nullptr;
 		SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
 		return;
 	}
@@ -1416,13 +1412,10 @@ static void KeepTopMost(HWND hwnd) {
 		break;
 	}
 	if (!cover) {
-		g_topJumpedOver = nullptr;
 		return;
 	}
-	if (cover == g_topJumpedOver) {
-		return; // jumped over it once already; don't fight another always-on-top app
-	}
-	g_topJumpedOver = cover;
+	// Something topmost is covering us (e.g. the Run dialog) -- always jump back
+	// above it. The fullscreen guard above already keeps us off games/slideshows.
 	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
 }
 
