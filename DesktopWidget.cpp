@@ -106,6 +106,7 @@ constexpr wchar_t kWidgetSettingsEvent[] = L"DesktopWidgetSettings";
 constexpr wchar_t kWidgetClass[] = L"DesktopWidgetWnd";
 constexpr wchar_t kSection[] = L"Widget";
 constexpr UINT_PTR kTimerId = 1;
+constexpr UINT_PTR kTopGuardTimerId = 2; // one-shot re-check after a foreground change
 
 constexpr DWORD Bit(int m) {
 	return 1u << m;
@@ -1388,7 +1389,9 @@ static void KeepTopMost(HWND hwnd) {
 	const DWORD myPid = GetCurrentProcessId();
 	HWND cover = nullptr;
 	for (HWND w = GetWindow(hwnd, GW_HWNDPREV); w; w = GetWindow(w, GW_HWNDPREV)) {
-		if (!IsWindowVisible(w) || !(GetWindowLongPtrW(w, GWL_EXSTYLE) & WS_EX_TOPMOST)) {
+		// No WS_EX_TOPMOST test: "Show desktop" (Win+D) raises the shell's
+		// WorkerW windows above the topmost band without giving them the style.
+		if (!IsWindowVisible(w)) {
 			continue;
 		}
 		DWORD pid = 0;
@@ -1414,9 +1417,21 @@ static void KeepTopMost(HWND hwnd) {
 	if (!cover) {
 		return;
 	}
-	// Something topmost is covering us (e.g. the Run dialog) -- always jump back
-	// above it. The fullscreen guard above already keeps us off games/slideshows.
+	// Something is covering us (e.g. the Run dialog, the raised desktop) -- always
+	// jump back above it. The fullscreen guard above already keeps us off
+	// games/slideshows.
 	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+}
+
+// The 1 s tick is too slow for "Show desktop": re-check right when the
+// foreground window changes, and once more shortly after, since the shell may
+// finish raising the desktop a moment after the foreground event.
+static void CALLBACK TopGuard_OnForeground(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
+	if (!g_wnd) {
+		return;
+	}
+	KeepTopMost(g_wnd);
+	SetTimer(g_wnd, kTopGuardTimerId, 200, nullptr);
 }
 
 LRESULT CALLBACK WidgetProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -1432,6 +1447,9 @@ LRESULT CALLBACK WidgetProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			InvalidateRect(hwnd, nullptr, FALSE);
 			SyncTrayIcon();
 			KeepOnChosenMonitor(hwnd);
+			KeepTopMost(hwnd);
+		} else if (wParam == kTopGuardTimerId) {
+			KillTimer(hwnd, kTopGuardTimerId);
 			KeepTopMost(hwnd);
 		}
 		return 0;
@@ -1770,6 +1788,8 @@ void widget::RunWidget() {
 		Reposition(g_wnd);
 		KeepOnChosenMonitor(g_wnd);
 		SetTimer(g_wnd, kTimerId, 1000, nullptr);
+		HWINEVENTHOOK fgHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+			TopGuard_OnForeground, 0, 0, WINEVENT_OUTOFCONTEXT);
 		SyncTrayIcon();
 		HANDLE waits[2];
 		DWORD n = 0;
@@ -1807,6 +1827,10 @@ void widget::RunWidget() {
 		}
 		CloseSettingsWindow();
 		RemoveTrayIcon();
+		if (fgHook) {
+			UnhookWinEvent(fgHook);
+		}
+		KillTimer(g_wnd, kTopGuardTimerId);
 		KillTimer(g_wnd, kTimerId);
 		DestroyWindow(g_wnd);
 		g_wnd = nullptr;
